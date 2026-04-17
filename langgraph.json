@@ -1,0 +1,7 @@
+{
+  "dependencies": ["./apps/api"],
+  "graphs": {
+    "soil_crop_advisor": "./apps/api/soil_crop_advisor/langgraph_export.py:build_graph"
+  },
+  "env": "./.env"
+}
