@@ -8,6 +8,8 @@ import {
 } from "@assistant-ui/react";
 
 import { AssistantMarkdownText } from "@/components/assistant-markdown-text";
+import { useStreamState } from "@/components/assistant-panel";
+import { ToolTraceStrip } from "@/components/tool-trace-strip";
 
 const suggestions = [
   {
@@ -29,7 +31,7 @@ const suggestions = [
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="message-bubble user">
-      <div className="message-label">Advisor</div>
+      <div className="message-label">You</div>
       <MessagePrimitive.Parts
         components={{
           Text: () => <MessagePartPrimitive.Text className="message-text" />,
@@ -40,9 +42,19 @@ function UserMessage() {
 }
 
 function AssistantMessage() {
+  const { toolEvents, agentBusy } = useStreamState();
+
   return (
     <MessagePrimitive.Root className="message-bubble assistant">
       <div className="message-label">Soil Crop Advisor</div>
+
+      {/* Inline tool activity — Perplexity-style */}
+      {(toolEvents.length > 0 || agentBusy) && (
+        <div className="message-tools">
+          <ToolTraceStrip events={toolEvents} isRunning={agentBusy} live />
+        </div>
+      )}
+
       <MessagePrimitive.Parts
         components={{
           Text: AssistantMarkdownText,
@@ -57,17 +69,12 @@ function Composer() {
     <ComposerPrimitive.Root className="composer-root">
       <ComposerPrimitive.Input
         className="composer-input"
-        rows={4}
-        placeholder="Ask for feasible crops, fertilizer burdens, weather-aware ranking, or citation checks..."
+        rows={1}
+        placeholder="Ask about crops, fertilizer, weather risk..."
       />
-      <div className="composer-actions">
-        <p className="composer-hint">
-          Use the chat for workflow orchestration and the probe panel for the deterministic API contract.
-        </p>
-        <ComposerPrimitive.Send className="composer-send">
-          Send
-        </ComposerPrimitive.Send>
-      </div>
+      <ComposerPrimitive.Send className="composer-send">
+        Send
+      </ComposerPrimitive.Send>
     </ComposerPrimitive.Root>
   );
 }
@@ -76,20 +83,18 @@ export function Thread() {
   return (
     <div className="thread-panel">
       <div className="thread-panel-header">
-        <p className="eyebrow">Deepagents Runtime</p>
-        <h2>Conversation Workbench</h2>
-        <p className="panel-copy">
-          Streaming NDJSON from `/chat/stream`: markdown answers, live tool traces, and optional model reasoning — orchestrated by the deep agent runtime.
-        </p>
+        <p className="eyebrow">Soil Crop Advisor</p>
+        <h2>Ask about crops, soil, or fertilizer</h2>
       </div>
 
       <ThreadPrimitive.Root className="thread-root">
         <ThreadPrimitive.Viewport className="thread-viewport">
           <ThreadPrimitive.Empty>
             <div className="thread-empty">
-              <p className="empty-title">No advisory thread yet</p>
+              <p className="empty-title">What would you like to know?</p>
               <p className="empty-copy">
-                Start with a crop-ranking request, ask how confidence is determined, or have the deep agent call the deterministic recommendation tool for you.
+                Ask for crop rankings, fertilizer recommendations, weather-aware
+                analysis, or how confidence scores work.
               </p>
               <div className="suggestion-grid">
                 {suggestions.map((suggestion) => (

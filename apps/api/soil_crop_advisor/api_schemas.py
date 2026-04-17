@@ -131,6 +131,7 @@ class CropOptionModel(BaseModel):
     localAdoptionScore: float
     marketSignalScore: float
     inputBurdenScore: float
+    seasonSuitabilityScore: float
     finalScore: float
     confidenceBand: Literal["A", "B", "C"]
     reasons: list[str]

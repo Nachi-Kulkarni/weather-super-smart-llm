@@ -16,7 +16,8 @@ _FAMILY_PRIORITY = {
     "STCR": 0,
     "STCR_IPNS": 0,
     "TEST_SYNTHETIC": 0,
-    "POP_FALLBACK": 1,
+    "SCAFFOLD": 2,
+    "POP_FALLBACK": 3,
 }
 
 _GEOGRAPHY_PRIORITY = {
@@ -24,6 +25,7 @@ _GEOGRAPHY_PRIORITY = {
     "state": 1,
     "agro_region": 2,
     "national": 3,
+    "scaffold": 4,
 }
 
 
@@ -44,6 +46,12 @@ def _geography_matches(rule: EquationRule, location: Location) -> bool:
     return True
 
 
+def _soil_order_matches(rule: EquationRule, soil_order: str | None) -> bool:
+    if not soil_order or not rule.soil_order:
+        return True
+    return rule.soil_order == soil_order
+
+
 def _sort_key(rule: EquationRule) -> tuple[int, int]:
     return (
         _FAMILY_PRIORITY.get(rule.equation_family, 99),
@@ -56,9 +64,16 @@ def select_best_rule(
     location: Location,
     season_name: str,
     rules: list[EquationRule],
+    soil_order: str | None = None,
 ) -> RuleSelection:
     candidate_rules = [rule for rule in rules if rule.crop_code == crop_code and _season_matches(rule, season_name)]
     matched_rules = [rule for rule in candidate_rules if _geography_matches(rule, location)]
+    if soil_order:
+        soil_matched = [rule for rule in matched_rules if _soil_order_matches(rule, soil_order)]
+        if soil_matched:
+            matched_rules = soil_matched
+        else:
+            matched_rules = matched_rules
     warnings: list[str] = []
 
     if not matched_rules:
@@ -73,8 +88,8 @@ def select_best_rule(
 
     if selected_rule.geography_scope != "district":
         warnings.append(f"Using {selected_rule.geography_scope}-scope rule instead of district scope.")
-    if selected_rule.equation_family == "POP_FALLBACK":
-        warnings.append("Using package-of-practice fallback instead of a verified STCR equation.")
+    if selected_rule.equation_family in ("POP_FALLBACK", "SCAFFOLD", "national"):
+        warnings.append(f"Using {selected_rule.equation_family} - NOT verified for this district. Consult local KVK for exact doses.")
 
     return RuleSelection(
         selected_rule=selected_rule,

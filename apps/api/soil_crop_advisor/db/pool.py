@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
-from psycopg_pool import ConnectionPool
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
+
+_pool: "ConnectionPool | None" = None
+_psql_available = True
+
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:
+    _psql_available = False
+    ConnectionPool = None
 
 _logger = logging.getLogger(__name__)
-
-_pool: ConnectionPool | None = None
 
 
 def get_database_url() -> str | None:
@@ -19,9 +27,11 @@ def get_database_url() -> str | None:
     return raw.strip()
 
 
-def get_pool() -> ConnectionPool | None:
+def get_pool() -> "ConnectionPool | None":
     """Lazily open a shared connection pool (or None when DB is not configured)."""
     global _pool
+    if not _psql_available:
+        return None
     url = get_database_url()
     if url is None:
         return None

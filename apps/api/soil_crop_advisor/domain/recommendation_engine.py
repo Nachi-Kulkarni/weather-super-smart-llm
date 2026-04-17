@@ -36,6 +36,7 @@ class RecommendationEngine:
         local_adoption_overrides: dict[str, float] | None = None,
         market_signal_overrides: dict[str, float] | None = None,
         organic_contributions: dict[str, float] | None = None,
+        soil_order: str | None = None,
     ) -> RecommendationResponse:
         local_adoption_overrides = local_adoption_overrides or {}
         market_signal_overrides = market_signal_overrides or {}
@@ -60,6 +61,16 @@ class RecommendationEngine:
             )
 
         for crop in candidate_crops:
+            # Reject crops that are not suitable for the requested season
+            if crop.season_names and season_name.lower() not in [s.lower() for s in crop.season_names]:
+                rejected_crops.append(
+                    RejectedCrop(
+                        crop_name=crop.crop_name,
+                        reason=f"{crop.crop_name} is not a {season_name} crop in this region (suitable seasons: {', '.join(crop.season_names)}).",
+                    )
+                )
+                continue
+
             option_or_rejection = self._recommend_for_crop(
                 crop=crop,
                 location=location,
@@ -71,6 +82,7 @@ class RecommendationEngine:
                 local_adoption_score=local_adoption_overrides.get(crop.crop_code, 0.5),
                 market_signal_score=market_signal_overrides.get(crop.crop_code, 0.5),
                 organic_contributions=organic_contributions,
+                soil_order=soil_order,
             )
             if isinstance(option_or_rejection, RecommendationOption):
                 options.append(option_or_rejection)
@@ -97,6 +109,7 @@ class RecommendationEngine:
                 local_adoption_score=option.local_adoption_score,
                 market_signal_score=option.market_signal_score,
                 input_burden_score=option.input_burden_score,
+                season_suitability_score=option.season_suitability_score,
                 final_score=option.final_score,
                 confidence_band=option.confidence_band,
                 reasons=list(option.reasons),
@@ -148,12 +161,14 @@ class RecommendationEngine:
         local_adoption_score: float,
         market_signal_score: float,
         organic_contributions: dict[str, float],
+        soil_order: str | None = None,
     ) -> RecommendationOption | RejectedCrop:
         selection = select_best_rule(
             crop_code=crop.crop_code,
             location=location,
             season_name=season_name,
             rules=self.repository.list_rules(crop.crop_code),
+            soil_order=soil_order,
         )
         rule = selection.selected_rule
         if rule is None:
@@ -176,6 +191,10 @@ class RecommendationEngine:
             target_yield=resolved_target_yield_value,
             organic_contributions=organic_contributions,
         )
+
+        # Season suitability: crop is in-season (already filtered above, so this is always >= 0.8)
+        season_suitability = _compute_season_suitability(crop, season_name)
+
         scores = compute_scores(
             recommended_n=fertilizer.recommended_n,
             recommended_p=fertilizer.recommended_p,
@@ -184,6 +203,7 @@ class RecommendationEngine:
             weather=weather,
             local_adoption_score=local_adoption_score,
             market_signal_score=market_signal_score,
+            season_suitability_score=season_suitability,
         )
 
         confidence_band = compute_confidence_band(rule)
@@ -201,12 +221,14 @@ class RecommendationEngine:
             f"Used {rule.equation_family} rule at {rule.geography_scope} scope.",
             f"Computed fertilizer need in {fertilizer.nutrient_basis} basis.",
             f"Applied scoring version {self.scoring_version}.",
+            f"Season suitability for {season_name}: {season_suitability:.2f}.",
         ]
         cautions = list(selection.warnings)
         if weather is None:
             cautions.append("Weather score is neutral because no forecast payload was supplied.")
         if confidence_band != "A":
             cautions.append("Result is not an exact district-level verified STCR match.")
+        cautions.append("Fertilizer values are indicative — district, pH, and target yield are needed for precise STCR calculations.")
 
         return RecommendationOption(
             crop_id=crop.crop_code,
@@ -224,6 +246,7 @@ class RecommendationEngine:
             local_adoption_score=scores.local_adoption_score,
             market_signal_score=scores.market_signal_score,
             input_burden_score=scores.input_burden_score,
+            season_suitability_score=scores.season_suitability_score,
             final_score=scores.final_score,
             confidence_band=confidence_band,
             reasons=reasons,
@@ -241,3 +264,24 @@ class RecommendationEngine:
                 "scoreTrace": scores.trace,
             },
         )
+
+
+def _compute_season_suitability(crop: CropMetadata, season_name: str) -> float:
+    """Score how well a crop fits the requested season.
+
+    Crops that match the primary season for the region get a high score.
+    Multi-season crops get a moderate score (they're flexible but not optimal).
+    """
+    if not crop.season_names:
+        return 0.6  # no calendar data — neutral-low
+
+    season_lower = season_name.lower()
+    crop_seasons_lower = [s.lower() for s in crop.season_names]
+
+    if season_lower not in crop_seasons_lower:
+        return 0.1  # shouldn't happen (filtered earlier), but defensive
+
+    # Single-season match (strong signal) vs multi-season (more flexible)
+    if len(crop_seasons_lower) == 1:
+        return 1.0  # this crop is exclusively grown in this season
+    return 0.85  # multi-season crop — decent fit but less specialized

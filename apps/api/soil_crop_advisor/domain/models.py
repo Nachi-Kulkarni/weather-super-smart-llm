@@ -58,6 +58,7 @@ class EquationRule:
     state_name: str | None = None
     district_name: str | None = None
     agro_region_code: str | None = None
+    soil_order: str | None = None
     season_name: str | None = None
     confidence_band: ConfidenceBand = "A"
     nr_n: float | None = None
@@ -101,6 +102,7 @@ class RecommendationOption:
     local_adoption_score: float
     market_signal_score: float
     input_burden_score: float
+    season_suitability_score: float
     final_score: float
     confidence_band: ConfidenceBand
     reasons: list[str]

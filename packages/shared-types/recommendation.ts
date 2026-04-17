@@ -22,6 +22,7 @@ export interface CropOption {
   localAdoptionScore: number;
   marketSignalScore: number;
   inputBurdenScore: number;
+  seasonSuitabilityScore: number;
   finalScore: number;
   confidenceBand: ConfidenceBand;
   reasons: string[];

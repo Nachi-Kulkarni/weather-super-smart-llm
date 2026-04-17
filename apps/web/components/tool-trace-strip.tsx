@@ -10,53 +10,64 @@ export type ToolEvent = {
 type Props = {
   events: ToolEvent[];
   isRunning?: boolean;
-  /** When true, skip stagger animation so live streamed tool rows appear immediately. */
   live?: boolean;
 };
 
-/**
- * Visualizes deep-agent tool calls. For buffered (non-streaming) responses we replay with CSS delays;
- * for `/chat/stream` use `live` so start/end lines show up as they arrive.
- */
-export function ToolTraceStrip({ events, isRunning, live }: Props) {
-  if (!events.length && !isRunning) {
+/** Collapse raw start/end/error events into one row per tool invocation. */
+type CollapsedTool = {
+  tool: string;
+  status: "running" | "done" | "error";
+  detail?: string | null;
+};
+
+function collapseEvents(events: ToolEvent[]): CollapsedTool[] {
+  const map = new Map<string, CollapsedTool>();
+
+  for (const ev of events) {
+    const key = ev.tool;
+    const existing = map.get(key);
+
+    if (ev.phase === "start") {
+      map.set(key, { tool: ev.tool, status: "running" });
+    } else if (ev.phase === "end") {
+      map.set(key, { tool: ev.tool, status: "done" });
+    } else if (ev.phase === "error") {
+      map.set(key, { tool: ev.tool, status: "error", detail: ev.detail });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+export function ToolTraceStrip({ events, isRunning }: Props) {
+  const tools = collapseEvents(events);
+
+  if (!tools.length && !isRunning) {
     return null;
   }
 
+  // Only show tools that are still running — hide finished ones
+  const running = tools.filter((t) => t.status === "running");
+
   return (
-    <div className={`tool-trace${live ? " tool-trace-live" : ""}`} aria-live="polite">
-      <div className="tool-trace-header">
-        <span className="tool-trace-pulse" aria-hidden />
-        <span>Tool activity</span>
-        {isRunning ? <span className="tool-trace-running">Running…</span> : null}
-      </div>
+    <div className="tool-trace-inline tool-trace-live">
       <ol className="tool-trace-list">
-        {events.map((event, index) => (
-          <li
-            className={`tool-trace-item tool-phase-${event.phase}`}
-            key={`${event.tool}-${event.at ?? index}-${index}`}
-            style={
-              live
-                ? undefined
-                : { animationDelay: `${index * 90}ms` }
-            }
-          >
-            <span className="tool-trace-name">{humanizeToolName(event.tool)}</span>
-            <span className="tool-trace-phase">{phaseLabel(event.phase)}</span>
-            {event.detail &&
-            (event.phase === "error" || event.phase === "start") ? (
-              <span
-                className={
-                  event.phase === "error"
-                    ? "tool-trace-detail"
-                    : "tool-trace-detail tool-trace-detail-muted"
-                }
-              >
-                {event.detail}
-              </span>
-            ) : null}
+        {running.map((t) => (
+          <li className="tool-trace-item tool-phase-start" key={t.tool}>
+            <span className="tool-trace-icon">
+              <span className="tool-icon-spin">&#9696;</span>
+            </span>
+            <span className="tool-trace-name">{humanizeToolName(t.tool)}</span>
           </li>
         ))}
+        {isRunning && !running.length && (
+          <li className="tool-trace-item tool-phase-start">
+            <span className="tool-trace-icon">
+              <span className="tool-icon-spin">&#9696;</span>
+            </span>
+            <span className="tool-trace-name">Thinking...</span>
+          </li>
+        )}
       </ol>
     </div>
   );
@@ -64,14 +75,4 @@ export function ToolTraceStrip({ events, isRunning, live }: Props) {
 
 function humanizeToolName(name: string) {
   return name.replace(/_/g, " ");
-}
-
-function phaseLabel(phase: ToolEvent["phase"]) {
-  if (phase === "start") {
-    return "started";
-  }
-  if (phase === "error") {
-    return "error";
-  }
-  return "done";
 }

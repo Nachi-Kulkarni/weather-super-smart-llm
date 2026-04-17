@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -21,6 +23,8 @@ from .logging_config import setup_logging
 from .service import SCORING_VERSION, build_response
 
 load_repo_env()
+
+_logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -91,6 +95,10 @@ def chat(payload: ChatRequest) -> ChatResponse:
             toolEvents=[],
         )
 
+    _logger.info("chat request: %d messages, last user msg: %s",
+                 len(messages), messages[-1]["content"][:120] if messages[-1]["role"] == "user" else "(assistant)")
+
+    t0 = time.time()
     with tool_trace_session() as tool_events:
         try:
             result = get_agent().invoke({"messages": messages})
@@ -98,6 +106,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
             content = getattr(last_message, "content", "")
             text = _message_content_to_text(content)
         except Exception as exc:
+            _logger.exception("deep agent chat failed")
             text = (
                 "Deep agent chat is configured, but it could not run yet. "
                 "Set `SOIL_CROP_ADVISOR_MODEL` plus the matching provider API key, "
@@ -106,6 +115,9 @@ def chat(payload: ChatRequest) -> ChatResponse:
             )
 
     events = [ToolEventModel.model_validate(event) for event in tool_events]
+    elapsed = time.time() - t0
+    _logger.info("chat response: %.1fs, %d tool events, %d chars text",
+                 elapsed, len(events), len(text))
     return ChatResponse(text=text, toolEvents=events)
 
 

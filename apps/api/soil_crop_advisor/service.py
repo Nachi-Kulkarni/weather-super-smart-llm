@@ -4,14 +4,17 @@ import logging
 from typing import Any
 
 from .api_schemas import (
-    RecommendRequest,
+    ChatRequest,
+    ChatResponse,
     RecommendationResponseModel,
-    RetrievalChunkModel,
+    RecommendRequest,
+    ToolEventModel,
     SoilSampleInput,
     SoilNpkOffset,
     WhatIfScenarioModel,
 )
-from .db import PgCatalogRepository, get_pool
+from .db import get_pool
+from .db.pg_repository import PgCatalogRepository
 from .domain.models import Location, SoilSample, WeatherProfile
 from .domain.recommendation_engine import RecommendationEngine
 from .domain.repository import CatalogRepository, InMemoryCatalogRepository
@@ -26,10 +29,11 @@ SCORING_VERSION = "2026-04-10-starter"
 
 _repository: CatalogRepository | None = None
 _engine: RecommendationEngine | None = None
+_stcr_ref_repo: CatalogRepository | None = None
 
 
 def get_repository() -> CatalogRepository:
-    """Prefer Postgres when `DATABASE_URL` is set; otherwise use the bundled Karnataka demo catalog."""
+    """Prefer Postgres when `DATABASE_URL` is set; returns empty catalog if no DB and no STCR match."""
     global _repository
     if _repository is None:
         pool = get_pool()
@@ -37,9 +41,24 @@ def get_repository() -> CatalogRepository:
             _repository = PgCatalogRepository(pool)
             _logger.info("catalog repository: postgres")
         else:
-            _repository = InMemoryCatalogRepository.demo_karnataka()
-            _logger.info("catalog repository: in-memory demo (set DATABASE_URL for Postgres)")
+            _repository = InMemoryCatalogRepository.empty()
+            _logger.info("catalog repository: empty (set DATABASE_URL for Postgres, or ingest STCR data)")
     return _repository
+
+
+def get_stcr_reference_repository() -> CatalogRepository:
+    """Get STCR reference data for Karnataka (UAS Bangalore 2022-2026).
+
+    Use this only when:
+    - Location is Karnataka AND district is one of Tumkur, Shimoga, Hassan, Chikmagalur
+    - Need to demonstrate STCR structure/coefficients
+    - NOT for production use
+    """
+    global _stcr_ref_repo
+    if _stcr_ref_repo is None:
+        _stcr_ref_repo = InMemoryCatalogRepository.stcr_reference()
+        _logger.info("catalog repository: STCR Karnataka reference only")
+    return _stcr_ref_repo
 
 
 def get_engine() -> RecommendationEngine:
@@ -229,6 +248,7 @@ def _domain_to_response(domain: RecommendationResponse) -> dict[str, Any]:
                 "localAdoptionScore": option.local_adoption_score,
                 "marketSignalScore": option.market_signal_score,
                 "inputBurdenScore": option.input_burden_score,
+                "seasonSuitabilityScore": option.season_suitability_score,
                 "finalScore": option.final_score,
                 "confidenceBand": option.confidence_band,
                 "reasons": option.reasons,
@@ -270,7 +290,26 @@ def _domain_to_response(domain: RecommendationResponse) -> dict[str, Any]:
 def build_response(request: RecommendRequest) -> RecommendationResponseModel:
     weather = resolve_weather(request)
 
-    domain = get_engine().recommend(
+    is_karnataka_stcr_district = (
+        request.location.state and request.location.state.lower() == "karnataka"
+        and request.location.district
+        and request.location.district.lower() in ("tumkur", "shimoga", "hassan", "chikmagalur")
+    )
+
+    if is_karnataka_stcr_district:
+        engine = RecommendationEngine(
+            repository=get_stcr_reference_repository(),
+            scoring_version=SCORING_VERSION,
+        )
+    else:
+        engine = get_engine()
+        if request.location.state and request.location.state.lower() == "karnataka":
+            _logger.info(
+                "Karnataka location '%s' not in STCR reference district; using universal fallback",
+                request.location.district,
+            )
+
+    domain = engine.recommend(
         location=Location(
             state=request.location.state,
             district=request.location.district,

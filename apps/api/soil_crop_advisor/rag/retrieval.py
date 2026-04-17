@@ -3,13 +3,21 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from psycopg_pool import ConnectionPool
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 from .embeddings import embed_query_text
 
 _logger = logging.getLogger(__name__)
+
+_psql_available = True
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:
+    ConnectionPool = None
+    _psql_available = False
 
 RRF_K = 60
 

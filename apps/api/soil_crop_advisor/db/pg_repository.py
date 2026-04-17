@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from psycopg_pool import ConnectionPool
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 from ..domain.models import CropMetadata, EquationRule
 from ..domain.repository import CatalogRepository
+
+_psql_available = True
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:
+    ConnectionPool = None
+    _psql_available = False
 
 
 def _uuid_to_str(value: Any) -> str | None:
@@ -20,18 +28,25 @@ def _uuid_to_str(value: Any) -> str | None:
 class PgCatalogRepository(CatalogRepository):
     """Load crops and STCR-style rules from Postgres (see `db/schema.sql`)."""
 
-    def __init__(self, pool: ConnectionPool) -> None:
+    def __init__(self, pool: "ConnectionPool") -> None:
         self._pool = pool
 
     def list_crops(self) -> list[CropMetadata]:
         sql = """
-            SELECT crop_code,
-                   crop_name,
-                   crop_group,
-                   default_target_yield_value,
-                   default_target_yield_unit
-            FROM crop
-            ORDER BY crop_name
+            SELECT c.crop_code,
+                   c.crop_name,
+                   c.crop_group,
+                   c.default_target_yield_value,
+                   c.default_target_yield_unit,
+                   COALESCE(
+                       array_agg(DISTINCT cc.season_name) FILTER (WHERE cc.season_name IS NOT NULL),
+                       ARRAY[]::TEXT[]
+                   ) AS season_names
+            FROM crop c
+            LEFT JOIN crop_calendar cc ON cc.crop_id = c.id
+            GROUP BY c.crop_code, c.crop_name, c.crop_group,
+                     c.default_target_yield_value, c.default_target_yield_unit
+            ORDER BY c.crop_name
         """
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
@@ -40,7 +55,7 @@ class PgCatalogRepository(CatalogRepository):
 
         crops: list[CropMetadata] = []
         for row in rows:
-            code, name, group, default_yield, default_unit = row
+            code, name, group, default_yield, default_unit, season_names = row
             crops.append(
                 CropMetadata(
                     crop_code=code,
@@ -48,7 +63,7 @@ class PgCatalogRepository(CatalogRepository):
                     crop_group=group,
                     default_target_yield_value=float(default_yield) if default_yield is not None else None,
                     default_target_yield_unit=default_unit,
-                    season_names=(),
+                    season_names=tuple(season_names) if season_names else (),
                 )
             )
         return crops
@@ -69,6 +84,7 @@ class PgCatalogRepository(CatalogRepository):
                    e.state_name,
                    e.district_name,
                    e.agro_region_code,
+                   e.soil_order,
                    e.season_name,
                    e.confidence_band,
                    e.nr_n,
@@ -109,23 +125,24 @@ class PgCatalogRepository(CatalogRepository):
                     state_name=row[5],
                     district_name=row[6],
                     agro_region_code=row[7],
-                    season_name=row[8],
-                    confidence_band=row[9],
-                    nr_n=float(row[10]) if row[10] is not None else None,
-                    nr_p=float(row[11]) if row[11] is not None else None,
-                    nr_k=float(row[12]) if row[12] is not None else None,
-                    cs_n=float(row[13]) if row[13] is not None else None,
-                    cs_p=float(row[14]) if row[14] is not None else None,
-                    cs_k=float(row[15]) if row[15] is not None else None,
-                    cf_n=float(row[16]) if row[16] is not None else None,
-                    cf_p=float(row[17]) if row[17] is not None else None,
-                    cf_k=float(row[18]) if row[18] is not None else None,
-                    c_org_n=float(row[19]) if row[19] is not None else None,
-                    c_org_p=float(row[20]) if row[20] is not None else None,
-                    c_org_k=float(row[21]) if row[21] is not None else None,
-                    source_doc_id=_uuid_to_str(row[22]),
-                    source_title=row[23],
-                    citation_text=row[24],
+                    soil_order=row[8],
+                    season_name=row[9],
+                    confidence_band=row[10],
+                    nr_n=float(row[11]) if row[11] is not None else None,
+                    nr_p=float(row[12]) if row[12] is not None else None,
+                    nr_k=float(row[13]) if row[13] is not None else None,
+                    cs_n=float(row[14]) if row[14] is not None else None,
+                    cs_p=float(row[15]) if row[15] is not None else None,
+                    cs_k=float(row[16]) if row[16] is not None else None,
+                    cf_n=float(row[17]) if row[17] is not None else None,
+                    cf_p=float(row[18]) if row[18] is not None else None,
+                    cf_k=float(row[19]) if row[19] is not None else None,
+                    c_org_n=float(row[20]) if row[20] is not None else None,
+                    c_org_p=float(row[21]) if row[21] is not None else None,
+                    c_org_k=float(row[22]) if row[22] is not None else None,
+                    source_doc_id=_uuid_to_str(row[23]),
+                    source_title=row[24],
+                    citation_text=row[25],
                 )
             )
         return rules

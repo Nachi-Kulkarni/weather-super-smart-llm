@@ -13,6 +13,7 @@ class ScoreBreakdown:
     local_adoption_score: float
     market_signal_score: float
     input_burden_score: float
+    season_suitability_score: float
     final_score: float
     trace: dict[str, float]
 
@@ -61,6 +62,7 @@ def compute_scores(
     weather: WeatherProfile | None,
     local_adoption_score: float,
     market_signal_score: float,
+    season_suitability_score: float = 0.8,
 ) -> ScoreBreakdown:
     total_input = sum(value or 0.0 for value in (recommended_n, recommended_p, recommended_k))
     input_burden_score = clamp01(1.0 - (total_input / 400.0))
@@ -69,13 +71,16 @@ def compute_scores(
     agro_region_fit_score = compute_agro_region_score(rule)
     local_adoption_score = clamp01(local_adoption_score)
     market_signal_score = clamp01(market_signal_score)
+    season_suitability_score = clamp01(season_suitability_score)
 
+    # Rebalanced weights: less nutrient dominance, season suitability added
     final_score = clamp01(
-        (0.45 * nutrient_fit_score)
+        (0.30 * nutrient_fit_score)
         + (0.20 * weather_feasibility_score)
-        + (0.15 * agro_region_fit_score)
+        + (0.15 * season_suitability_score)
+        + (0.12 * agro_region_fit_score)
         + (0.10 * local_adoption_score)
-        + (0.05 * market_signal_score)
+        + (0.08 * market_signal_score)
         + (0.05 * input_burden_score)
     )
 
@@ -86,6 +91,7 @@ def compute_scores(
         local_adoption_score=local_adoption_score,
         market_signal_score=market_signal_score,
         input_burden_score=input_burden_score,
+        season_suitability_score=season_suitability_score,
         final_score=final_score,
         trace={
             "nutrientFitScore": nutrient_fit_score,
@@ -94,6 +100,7 @@ def compute_scores(
             "localAdoptionScore": local_adoption_score,
             "marketSignalScore": market_signal_score,
             "inputBurdenScore": input_burden_score,
+            "seasonSuitabilityScore": season_suitability_score,
             "finalScore": final_score,
         },
     )
